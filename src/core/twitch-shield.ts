@@ -1,27 +1,24 @@
-import { getTranslations, SupportedLanguage } from '../i18n';
-import { loadUserConfig, saveUserConfig, getCachedGQLHash, setCachedGQLHash } from '../config';
-
 export function runTwitchShield() {
   'use strict';
 
-  const ourTwitchShieldVersion = 38;
+  const ourTwitchShieldVersion = 39;
   const win = window as any;
 
   if (typeof win.twitchShieldVersion !== 'undefined' && win.twitchShieldVersion >= ourTwitchShieldVersion) {
-    console.log("[TwitchShield] Ya está activo v" + win.twitchShieldVersion);
+    console.log('[TwitchShield] Ya está activo v' + win.twitchShieldVersion);
     return;
   }
   win.twitchShieldVersion = ourTwitchShieldVersion;
-
-  const userConfig = loadUserConfig();
-  let currentLang: SupportedLanguage = userConfig.language || 'es';
-  let isSilentMode = userConfig.silentMode ?? true;
-  let t = getTranslations(currentLang);
+  win.TwitchShieldSilentMode = true; // Por defecto: modo silencioso sin banners en pantalla
 
   function declareOptions(scope: any) {
     scope.AdSignifier = 'stitched';
     scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
-    scope.BackupPlayerTypes = ['embed', 'popout', 'autoplay'];
+    scope.BackupPlayerTypes = [
+      'embed',
+      'popout',
+      'autoplay'
+    ];
     scope.FallbackPlayerType = 'embed';
     scope.ForceAccessTokenPlayerType = 'popout';
     scope.SkipPlayerReloadOnHevc = false;
@@ -37,9 +34,9 @@ export function runTwitchShield() {
     scope.ClientSession = null;
     scope.ClientIntegrityHeader = null;
     scope.AuthorizationHeader = undefined;
-    scope.GQLPlaybackAccessTokenHash = getCachedGQLHash() || 'ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9';
+    scope.GQLPlaybackAccessTokenHash = (typeof localStorage !== 'undefined' ? localStorage.getItem('TWITCH_SHIELD_GQL_HASH') : null) || 'ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9';
     scope.SimulatedAdsDepth = 0;
-    scope.PlayerBufferingFix = userConfig.playerBufferingFix ?? true;
+    scope.PlayerBufferingFix = true;
     scope.PlayerBufferingDelay = 600;
     scope.PlayerBufferingSameStateCount = 3;
     scope.PlayerBufferingDangerZone = 1;
@@ -48,10 +45,9 @@ export function runTwitchShield() {
     scope.PlayerBufferingPrerollCheckEnabled = false;
     scope.PlayerBufferingPrerollCheckOffset = 5;
     scope.V2API = false;
-    scope.IsAdStrippingEnabled = userConfig.isAdStrippingEnabled ?? true;
+    scope.IsAdStrippingEnabled = true;
     scope.AdSegmentCache = new Map();
     scope.AllSegmentsAreAdSegments = false;
-    scope.SilentMode = isSilentMode;
   }
 
   let isActivelyStrippingAds = false;
@@ -235,7 +231,9 @@ export function runTwitchShield() {
       extensions: {
         persistedQuery: {
           version: 1,
-          sha256Hash: s.GQLPlaybackAccessTokenHash || "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9"
+          sha256Hash: (typeof s.GQLPlaybackAccessTokenHash !== 'undefined' && s.GQLPlaybackAccessTokenHash)
+            ? s.GQLPlaybackAccessTokenHash
+            : 'ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9'
         }
       }
     };
@@ -571,8 +569,6 @@ export function runTwitchShield() {
               AuthorizationHeader = e.data.value;
             } else if (e.data.key == 'UpdateGQLHash') {
               GQLPlaybackAccessTokenHash = e.data.value;
-            } else if (e.data.key == 'UpdateSilentMode') {
-              SilentMode = e.data.value;
             } else if (e.data.key == 'FetchResponse') {
               const responseData = e.data.value;
               if (pendingFetchRequests.has(responseData.id)) {
@@ -635,10 +631,9 @@ export function runTwitchShield() {
   }
 
   function updateAdblockBanner(data: any) {
-    // Si silentMode está activo, NO mostramos banner en pantalla para no interrumpir
-    if (isSilentMode) {
+    if (win.TwitchShieldSilentMode) {
       if (data.hasAds) {
-        console.log(`[TwitchShield] ${t.blockingAds} (${data.isMidroll ? 'midroll' : 'preroll'})`);
+        console.log(`[TwitchShield] Bloqueando anuncios (${data.isMidroll ? 'midroll' : 'preroll'})`);
       }
       return;
     }
@@ -656,12 +651,95 @@ export function runTwitchShield() {
       }
       if (adBlockDiv != null) {
         isActivelyStrippingAds = data.isStrippingAdSegments;
-        let msg = data.isMidroll ? t.blockingMidroll : t.blockingAds;
-        if (data.isStrippingAdSegments) msg += ` (${t.strippingAds})`;
+        let msg = data.isMidroll ? 'Bloqueando anuncios (midroll)...' : 'Bloqueando anuncios...';
+        if (data.isStrippingAdSegments) msg += ' (suprimiendo)';
         adBlockDiv.P.textContent = `🛡️ ${msg}`;
         adBlockDiv.style.display = data.hasAds ? 'block' : 'none';
       }
     }
+  }
+
+  let playerForMonitoringBuffering: any = null;
+  const playerBufferState = {
+    channelName: null as string | null,
+    hasStreamStarted: false,
+    position: 0,
+    bufferedPosition: 0,
+    bufferDuration: 0,
+    numSame: 0,
+    lastFixTime: 0,
+    isLive: true
+  };
+
+  function monitorPlayerBuffering() {
+    if (playerForMonitoringBuffering) {
+      try {
+        const player = playerForMonitoringBuffering.player;
+        const state = playerForMonitoringBuffering.state;
+        if (!player.core) {
+          playerForMonitoringBuffering = null;
+        } else if (state.props?.content?.type === 'live' && !player.isPaused() && !player.getHTMLVideoElement()?.ended && playerBufferState.lastFixTime <= Date.now() - 8000 && !isActivelyStrippingAds) {
+          const m3u8Url = player.core?.state?.path;
+          if (m3u8Url) {
+            const fileName = new URL(m3u8Url).pathname.split('/').pop();
+            if (fileName?.endsWith('.m3u8')) {
+              const channelName = fileName.slice(0, -5);
+              if (playerBufferState.channelName != channelName) {
+                playerBufferState.channelName = channelName;
+                playerBufferState.hasStreamStarted = false;
+                playerBufferState.numSame = 0;
+              }
+            }
+          }
+          if (player.getState() === 'Playing') {
+            playerBufferState.hasStreamStarted = true;
+          }
+          const position = player.core?.state?.position;
+          const bufferedPosition = player.core?.state?.bufferedPosition;
+          const bufferDuration = player.getBufferDuration ? player.getBufferDuration() : 0;
+          if (position !== undefined && bufferedPosition !== undefined) {
+            if (playerBufferState.hasStreamStarted &&
+                (playerBufferState.position == position || bufferDuration < 1) &&
+                playerBufferState.bufferedPosition == bufferedPosition &&
+                playerBufferState.bufferDuration >= bufferDuration &&
+                (position != 0 || bufferedPosition != 0 || bufferDuration != 0)
+            ) {
+              playerBufferState.numSame++;
+              if (playerBufferState.numSame == 3) {
+                console.log('[TwitchShield] Detectado congelamiento en buffer, corrigiendo...');
+                doTwitchPlayerTask(true, false);
+                playerBufferState.lastFixTime = Date.now();
+                playerBufferState.numSame = 0;
+              }
+            } else {
+              playerBufferState.numSame = 0;
+            }
+            playerBufferState.position = position;
+            playerBufferState.bufferedPosition = bufferedPosition;
+            playerBufferState.bufferDuration = bufferDuration;
+          } else {
+            playerBufferState.numSame = 0;
+          }
+        }
+      } catch (err) {
+        playerForMonitoringBuffering = null;
+      }
+    }
+    if (!playerForMonitoringBuffering) {
+      const playerAndState = getPlayerAndState();
+      if (playerAndState && playerAndState.player && playerAndState.state) {
+        playerForMonitoringBuffering = {
+          player: playerAndState.player,
+          state: playerAndState.state
+        };
+      }
+    }
+    const isLive = playerForMonitoringBuffering?.state?.props?.content?.type === 'live';
+    if (playerBufferState.isLive && !isLive) {
+      updateAdblockBanner({ hasAds: false });
+    }
+    playerBufferState.isLive = isLive;
+    setTimeout(monitorPlayerBuffering, 600);
   }
 
   function getPlayerAndState() {
@@ -705,7 +783,6 @@ export function runTwitchShield() {
   function doTwitchPlayerTask(isPausePlay: boolean, isReload: boolean) {
     const playerAndState = getPlayerAndState();
     if (!playerAndState || !playerAndState.player) {
-      // Fallback a elemento video nativo si React tree no está disponible
       const v = document.querySelector('video');
       if (v) {
         if (isPausePlay) {
@@ -790,12 +867,17 @@ export function runTwitchShield() {
                 const foundHash = it?.extensions?.persistedQuery?.sha256Hash;
                 if (foundHash && foundHash.length === 64 && foundHash !== s.GQLPlaybackAccessTokenHash) {
                   s.GQLPlaybackAccessTokenHash = foundHash;
-                  setCachedGQLHash(foundHash);
+                  try { localStorage.setItem('TWITCH_SHIELD_GQL_HASH', foundHash); } catch {}
                   postTwitchWorkerMessage('UpdateGQLHash', foundHash);
                   console.log('[TwitchShield] Hash dinámico capturado:', foundHash);
                 }
               }
             } catch {}
+
+            // Evitar miniplayer sobre chat
+            if (init.body.includes('picture-by-picture')) {
+              init.body = '';
+            }
 
             // Reemplazo de playerType por 'popout' para evitar prerolls
             const targetPlayerType = s.ForceAccessTokenPlayerType || 'popout';
@@ -825,7 +907,7 @@ export function runTwitchShield() {
           }
         }
       }
-      return (win.realFetch || realFetch).apply(this, [url, init, ...args] as any);
+      return realFetch.apply(this, arguments as any);
     };
   }
 
@@ -858,40 +940,63 @@ export function runTwitchShield() {
     document.addEventListener('webkitvisibilitychange', visibilityChange, true);
     document.addEventListener('mozvisibilitychange', visibilityChange, true);
     document.addEventListener('hasFocus', block, true);
+
+    // Preservar configuración de calidad y volumen
+    try {
+      const keysToCache = [
+        'video-quality',
+        'video-muted',
+        'volume',
+        'lowLatencyModeEnabled',
+        'persistenceEnabled'
+      ];
+      const cachedValues = new Map();
+      for (let i = 0; i < keysToCache.length; i++) {
+        cachedValues.set(keysToCache[i], localStorage.getItem(keysToCache[i]));
+      }
+      const realSetItem = localStorage.setItem;
+      localStorage.setItem = function(key: string, value: string) {
+        if (cachedValues.has(key)) {
+          cachedValues.set(key, value);
+        }
+        realSetItem.apply(this, arguments as any);
+      };
+      const realGetItem = localStorage.getItem;
+      localStorage.getItem = function(key: string) {
+        if (cachedValues.has(key)) {
+          return cachedValues.get(key);
+        }
+        return realGetItem.apply(this, arguments as any);
+      };
+    } catch (err) {
+      localStorageHookFailed = true;
+    }
   }
 
-  // API global en consola para personalización y control del usuario
+  // API en consola para el usuario
   win.TwitchShield = {
     version: ourTwitchShieldVersion,
     reloadStream: () => doTwitchPlayerTask(false, true),
     setSilentMode: (silent: boolean) => {
-      isSilentMode = silent;
-      (self as any).SilentMode = silent;
-      saveUserConfig({ silentMode: silent });
-      postTwitchWorkerMessage('UpdateSilentMode', silent);
+      win.TwitchShieldSilentMode = silent;
       console.log(`[TwitchShield] Modo silencioso: ${silent ? 'ACTIVADO' : 'DESACTIVADO'}`);
-    },
-    setLanguage: (lang: SupportedLanguage) => {
-      if (lang === 'es' || lang === 'en') {
-        currentLang = lang;
-        t = getTranslations(lang);
-        saveUserConfig({ language: lang });
-        console.log(`[TwitchShield] Idioma cambiado a: ${lang.toUpperCase()}`);
-      }
     },
     status: () => ({
       version: ourTwitchShieldVersion,
-      silentMode: isSilentMode,
-      language: currentLang,
-      capturedHash: (self as any).GQLPlaybackAccessTokenHash,
+      silentMode: win.TwitchShieldSilentMode,
+      capturedHash: (window as any).GQLPlaybackAccessTokenHash,
       activeWorkers: twitchWorkers.length
     })
   };
 
-  // Inicialización
+  // Inicialización exacta probada
   declareOptions(window);
   hookWindowWorker();
   hookFetch();
+
+  if ((window as any).PlayerBufferingFix !== false) {
+    monitorPlayerBuffering();
+  }
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
     onContentLoaded();
@@ -899,5 +1004,5 @@ export function runTwitchShield() {
     window.addEventListener('DOMContentLoaded', onContentLoaded);
   }
 
-  console.log(`[TwitchShield] Inicializado correctamente v${ourTwitchShieldVersion} (Modo: ${isSilentMode ? 'Silencioso' : 'Con avisos'}, Idioma: ${currentLang})`);
+  console.log(`[TwitchShield] Inicializado v${ourTwitchShieldVersion} (Modo: Silencioso, Idioma: ES)`);
 }

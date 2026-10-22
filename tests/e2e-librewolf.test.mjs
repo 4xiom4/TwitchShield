@@ -13,6 +13,14 @@ const htmlContent = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <title>Twitch Mock Test Page</title>
+  <script>
+    window.addEventListener('error', function(e) {
+      const errReq = new XMLHttpRequest();
+      errReq.open('POST', '/__report_error', false);
+      errReq.setRequestHeader('Content-Type', 'application/json');
+      errReq.send(JSON.stringify({ message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno, error: e.error ? String(e.error.stack) : '' }));
+    });
+  </script>
 </head>
 <body>
   <div id="root">
@@ -41,7 +49,7 @@ const htmlContent = `<!DOCTYPE html>
 
       try {
         // 1. Verify script loaded
-        if (window.twitchShieldVersion === 38) {
+        if (window.twitchShieldVersion === 39) {
           results.scriptLoaded = true;
         }
 
@@ -127,6 +135,7 @@ async function run() {
 
   let testResults = null;
   const server = http.createServer((req, res) => {
+    console.log('[Server Received Request]', req.url);
     if (req.url === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(htmlContent);
@@ -135,6 +144,14 @@ async function run() {
       req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
         testResults = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
+      });
+    } else if (req.url === '/__report_error' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        console.error('[E2E Test Browser Error]', body);
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('OK');
       });
