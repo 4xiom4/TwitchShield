@@ -11,7 +11,7 @@ Compatible con **Violentmonkey** o **Tampermonkey** (Firefox, Chrome, Brave, Edg
 
 1. Instala [Violentmonkey](https://violentmonkey.github.io/) o [Tampermonkey](https://www.tampermonkey.net/).
 2. Haz clic directamente en este enlace para instalarlo con un clic:
-   👉 **[Instalar TwitchShield en Userscript](https://raw.githubusercontent.com/4xiom4/TwitchShield/feat/modern-architecture/dist/twitch-shield.user.js)**
+   👉 **[Instalar TwitchShield en Userscript](https://raw.githubusercontent.com/4xiom4/TwitchShield/main/dist/twitch-shield.user.js)**
    *(O crea un nuevo script y pega el código compilado de [`dist/twitch-shield.user.js`](dist/twitch-shield.user.js)).*
 3. Guarda el script.
 4. Abre cualquier stream en [twitch.tv](https://www.twitch.tv). Funcionará de forma 100% silenciosa en segundo plano (sin banners ni elementos que interrumpan la visualización).
@@ -28,7 +28,7 @@ Compatible con **Violentmonkey** o **Tampermonkey** (Firefox, Chrome, Brave, Edg
 3. En la pestaña **Configuración**, activa la casilla **"Soy un usuario avanzado"** y haz clic en el icono del engranaje ⚙️.
 4. En `userResourcesLocation`, añade la URL remota del script alojado en GitHub:
    ```text
-   https://raw.githubusercontent.com/4xiom4/TwitchShield/feat/modern-architecture/dist/twitch-shield.ublock.js
+   https://raw.githubusercontent.com/4xiom4/TwitchShield/main/dist/twitch-shield.ublock.js
    ```
 5. Haz clic en **Aplicar cambios**.
 
