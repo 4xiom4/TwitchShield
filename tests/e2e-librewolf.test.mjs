@@ -15,10 +15,13 @@ const htmlContent = `<!DOCTYPE html>
   <title>Twitch Mock Test Page</title>
   <script>
     window.addEventListener('error', function(e) {
-      const errReq = new XMLHttpRequest();
-      errReq.open('POST', '/__report_error', false);
-      errReq.setRequestHeader('Content-Type', 'application/json');
-      errReq.send(JSON.stringify({ message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno, error: e.error ? String(e.error.stack) : '' }));
+      try {
+        fetch('/__report_error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno, error: e.error ? String(e.error.stack) : '' })
+        });
+      } catch {}
     });
   </script>
 </head>
@@ -70,17 +73,20 @@ const htmlContent = `<!DOCTYPE html>
         const testHash = 'a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890';
         let capturedBody = null;
 
-        const origFetch = window.realFetch;
+        const origFetch = window.realFetch || window.fetch;
         window.realFetch = async function(url, init) {
-          capturedBody = init?.body;
-          return new Response(JSON.stringify({
-            data: {
-              streamPlaybackAccessToken: {
-                signature: 'test-sig-123',
-                value: 'test-token-456'
+          if (typeof url === 'string' && url.includes('gql')) {
+            capturedBody = init?.body;
+            return new Response(JSON.stringify({
+              data: {
+                streamPlaybackAccessToken: {
+                  signature: 'test-sig-123',
+                  value: 'test-token-456'
+                }
               }
-            }
-          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          return origFetch(url, init);
         };
 
         const res = await window.fetch('https://gql.twitch.tv/gql', {
@@ -118,11 +124,16 @@ const htmlContent = `<!DOCTYPE html>
         results.errors.push(String(err));
       }
 
-      // Send results to test server synchronously
-      const req = new XMLHttpRequest();
-      req.open('POST', '/__report_results', false);
-      req.setRequestHeader('Content-Type', 'application/json');
-      req.send(JSON.stringify(results));
+      // Send results to test server
+      try {
+        await (window.realFetch || fetch)('/__report_results', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(results)
+        });
+      } catch (e) {
+        navigator.sendBeacon('/__report_results', JSON.stringify(results));
+      }
     }
 
     runE2ETest();

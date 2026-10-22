@@ -907,7 +907,7 @@ export function runTwitchShield() {
           }
         }
       }
-      return realFetch.apply(this, arguments as any);
+      return (win.realFetch || realFetch).apply(this, arguments as any);
     };
   }
 
