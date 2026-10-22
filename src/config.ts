@@ -1,7 +1,33 @@
-import { TwitchShieldConfig } from './types';
+import { SupportedLanguage } from './i18n';
+
+export interface TwitchShieldConfig {
+  version: number;
+  language: SupportedLanguage;
+  silentMode: boolean; // True by default: zero disruption on stream
+  adSignifier: string;
+  clientId: string;
+  backupPlayerTypes: string[];
+  fallbackPlayerType: string;
+  forceAccessTokenPlayerType: string;
+  skipPlayerReloadOnHevc: boolean;
+  alwaysReloadPlayerOnAd: boolean;
+  reloadPlayerAfterAd: boolean;
+  playerReloadMinimalRequestsTime: number;
+  playerReloadMinimalRequestsPlayerIndex: number;
+  playerBufferingFix: boolean;
+  playerBufferingDelay: number;
+  playerBufferingSameStateCount: number;
+  playerBufferingDangerZone: number;
+  playerBufferingDoPlayerReload: boolean;
+  playerBufferingMinRepeatDelay: number;
+  isAdStrippingEnabled: boolean;
+  debug: boolean;
+}
 
 export const DEFAULT_CONFIG: TwitchShieldConfig = {
-  version: 1,
+  version: 2,
+  language: 'es',
+  silentMode: true, // Non-disruptive by default
   adSignifier: 'stitched',
   clientId: 'kimne78kx3ncx6brgo4mv6wki5h1ko',
   backupPlayerTypes: ['embed', 'popout', 'autoplay'],
@@ -32,9 +58,7 @@ export function loadUserConfig(): TwitchShieldConfig {
       const parsed = JSON.parse(raw);
       return { ...DEFAULT_CONFIG, ...parsed };
     }
-  } catch (err) {
-    // Ignore storage parse error
-  }
+  } catch (err) {}
   return { ...DEFAULT_CONFIG };
 }
 
@@ -44,7 +68,7 @@ export function saveUserConfig(cfg: Partial<TwitchShieldConfig>): void {
     const updated = { ...current, ...cfg };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   } catch (err) {
-    console.error('[TwitchShield] Failed to save config to localStorage', err);
+    console.error('[TwitchShield] Error guardando configuración:', err);
   }
 }
 

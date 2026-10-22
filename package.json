@@ -6,7 +6,8 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/run-all.mjs"
+    "test": "node tests/run-all.mjs",
+    "test:e2e": "node tests/e2e-librewolf.test.mjs"
   },
   "keywords": ["twitch", "adblock", "userscript", "ublock-origin", "hls", "streaming"],
   "author": "4xiom4",
