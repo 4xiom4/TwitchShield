@@ -268,7 +268,10 @@ export function runTwitchShield() {
           headers
         }
       };
-      s.pendingFetchRequests.set(requestId, { resolve, reject });
+      const pendingMap = (typeof pendingFetchRequests !== 'undefined' ? pendingFetchRequests : s.pendingFetchRequests);
+      if (pendingMap) {
+        pendingMap.set(requestId, { resolve, reject });
+      }
       s.postMessage({
         key: 'FetchRequest',
         value: fetchRequest
@@ -503,6 +506,31 @@ export function runTwitchShield() {
                       s.StreamInfosByUrl[lines[i + 1]] = streamInfo;
                     }
                   }
+                  const nonHevcResolutionList = streamInfo.ResolutionList.filter((element: any) => element.Codecs.startsWith('avc') || element.Codecs.startsWith('av0'));
+                  if (s.AlwaysReloadPlayerOnAd || (nonHevcResolutionList.length > 0 && streamInfo.ResolutionList.some((element: any) => element.Codecs.startsWith('hev') || element.Codecs.startsWith('hvc')) && !s.SkipPlayerReloadOnHevc)) {
+                    if (nonHevcResolutionList.length > 0) {
+                      for (let i = 0; i < lines.length - 1; i++) {
+                        if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+                          const resSettings = parseAttributes(lines[i].substring(lines[i].indexOf(':') + 1));
+                          const codecsKey = 'CODECS';
+                          if (resSettings[codecsKey] && (resSettings[codecsKey].startsWith('hev') || resSettings[codecsKey].startsWith('hvc'))) {
+                            const oldResolution = resSettings['RESOLUTION'];
+                            const [targetWidth, targetHeight] = oldResolution.split('x').map(Number);
+                            const newResolutionInfo = nonHevcResolutionList.sort((a: any, b: any) => {
+                              const [streamWidthA, streamHeightA] = a.Resolution.split('x').map(Number);
+                              const [streamWidthB, streamHeightB] = b.Resolution.split('x').map(Number);
+                              return Math.abs((streamWidthA * streamHeightA) - (targetWidth * targetHeight)) - Math.abs((streamWidthB * streamHeightB) - (targetWidth * targetHeight));
+                            })[0];
+                            lines[i] = lines[i].replace(/CODECS="[^"]+"/, `CODECS="${newResolutionInfo.Codecs}"`);
+                            lines[i + 1] = newResolutionInfo.Url + ' '.repeat(i + 1);
+                          }
+                        }
+                      }
+                    }
+                    if (nonHevcResolutionList.length > 0 || s.AlwaysReloadPlayerOnAd) {
+                      streamInfo.ModifiedM3U8 = lines.join('\n');
+                    }
+                  }
                 }
                 streamInfo.LastPlayerReload = Date.now();
                 resolve(new Response(replaceServerTimeInM3u8(streamInfo.IsUsingModifiedM3U8 ? streamInfo.ModifiedM3U8 : streamInfo.EncodingsM3U8, serverTime)));
@@ -535,6 +563,7 @@ export function runTwitchShield() {
         const s = self as any;
         const newBlobStr = `
           const pendingFetchRequests = new Map();
+          self.pendingFetchRequests = pendingFetchRequests;
           ${stripAdSegments.toString()}
           ${getStreamUrlForResolution.toString()}
           ${processM3U8.toString()}
@@ -795,16 +824,49 @@ export function runTwitchShield() {
     const { player, state: playerState } = playerAndState;
     if (player.isPaused() || player.core?.paused) return;
 
+    playerBufferState.lastFixTime = Date.now();
+    playerBufferState.numSame = 0;
+
     if (isPausePlay) {
       player.pause();
       player.play();
       return;
     }
     if (isReload && playerState) {
+      const lsKeyQuality = 'video-quality';
+      const lsKeyMuted = 'video-muted';
+      const lsKeyVolume = 'volume';
+      let currentQualityLS: any = null;
+      let currentMutedLS: any = null;
+      let currentVolumeLS: any = null;
+      try {
+        currentQualityLS = localStorage.getItem(lsKeyQuality);
+        currentMutedLS = localStorage.getItem(lsKeyMuted);
+        currentVolumeLS = localStorage.getItem(lsKeyVolume);
+        if (localStorageHookFailed && player?.core?.state) {
+          localStorage.setItem(lsKeyMuted, JSON.stringify({ default: player.core.state.muted }));
+          localStorage.setItem(lsKeyVolume, player.core.state.volume);
+        }
+        if (localStorageHookFailed && player?.core?.state?.quality?.group) {
+          localStorage.setItem(lsKeyQuality, JSON.stringify({ default: player.core.state.quality.group }));
+        }
+      } catch {}
+
       console.log('[TwitchShield] Recargando reproductor de Twitch...');
       playerState.setSrc({ isNewMediaPlayerInstance: true, refreshAccessToken: true });
       postTwitchWorkerMessage('TriggeredPlayerReload', true);
       player.play();
+
+      if (localStorageHookFailed && (currentQualityLS || currentMutedLS || currentVolumeLS)) {
+        setTimeout(() => {
+          try {
+            if (currentQualityLS) localStorage.setItem(lsKeyQuality, currentQualityLS);
+            if (currentMutedLS) localStorage.setItem(lsKeyMuted, currentMutedLS);
+            if (currentVolumeLS) localStorage.setItem(lsKeyVolume, currentVolumeLS);
+          } catch {}
+        }, 3000);
+      }
+      return;
     }
   }
 
@@ -877,32 +939,32 @@ export function runTwitchShield() {
             // Evitar miniplayer sobre chat
             if (init.body.includes('picture-by-picture')) {
               init.body = '';
-            }
-
-            // Reemplazo de playerType por 'popout' para evitar prerolls
-            const targetPlayerType = s.ForceAccessTokenPlayerType || 'popout';
-            if (targetPlayerType) {
-              let replacedPlayerType = '';
-              try {
-                const newBody = JSON.parse(init.body);
-                if (Array.isArray(newBody)) {
-                  for (let i = 0; i < newBody.length; i++) {
-                    if (newBody[i]?.variables?.playerType && newBody[i]?.variables?.playerType !== targetPlayerType) {
-                      replacedPlayerType = newBody[i].variables.playerType;
-                      newBody[i].variables.playerType = targetPlayerType;
+            } else {
+              // Reemplazo de playerType por 'popout' para evitar prerolls
+              const targetPlayerType = s.ForceAccessTokenPlayerType || 'popout';
+              if (targetPlayerType) {
+                let replacedPlayerType = '';
+                try {
+                  const newBody = JSON.parse(init.body);
+                  if (Array.isArray(newBody)) {
+                    for (let i = 0; i < newBody.length; i++) {
+                      if (newBody[i]?.variables?.playerType && newBody[i]?.variables?.playerType !== targetPlayerType) {
+                        replacedPlayerType = newBody[i].variables.playerType;
+                        newBody[i].variables.playerType = targetPlayerType;
+                      }
+                    }
+                  } else {
+                    if (newBody?.variables?.playerType && newBody?.variables?.playerType !== targetPlayerType) {
+                      replacedPlayerType = newBody.variables.playerType;
+                      newBody.variables.playerType = targetPlayerType;
                     }
                   }
-                } else {
-                  if (newBody?.variables?.playerType && newBody?.variables?.playerType !== targetPlayerType) {
-                    replacedPlayerType = newBody.variables.playerType;
-                    newBody.variables.playerType = targetPlayerType;
+                  if (replacedPlayerType) {
+                    console.log(`[TwitchShield] Reemplazado '${replacedPlayerType}' por '${targetPlayerType}'`);
+                    init.body = JSON.stringify(newBody);
                   }
-                }
-                if (replacedPlayerType) {
-                  console.log(`[TwitchShield] Reemplazado '${replacedPlayerType}' por '${targetPlayerType}'`);
-                  init.body = JSON.stringify(newBody);
-                }
-              } catch {}
+                } catch {}
+              }
             }
           }
         }
@@ -917,6 +979,8 @@ export function runTwitchShield() {
         get() { return 'visible'; }
       });
     } catch {}
+    let hidden = (document as any).__lookupGetter__ ? (document as any).__lookupGetter__('hidden') : null;
+    let webkitHidden = (document as any).__lookupGetter__ ? (document as any).__lookupGetter__('webkitHidden') : null;
     try {
       Object.defineProperty(document, 'hidden', {
         get() { return false; }
@@ -929,17 +993,41 @@ export function runTwitchShield() {
       e.stopImmediatePropagation();
     };
 
-    const visibilityChange = () => {
+    let wasVideoPlaying = true;
+    const visibilityChange = (e: Event) => {
+      const isChrome = typeof (window as any).chrome !== 'undefined';
       const videos = document.getElementsByTagName('video');
-      if (videos.length > 0 && videos[0].paused && !videos[0].ended && videos[0].muted) {
-        videos[0].play().catch(() => {});
+      if (videos.length > 0) {
+        if ((hidden && hidden.apply(document) === true) || (webkitHidden && webkitHidden.apply(document) === true)) {
+          wasVideoPlaying = !videos[0].paused && !videos[0].ended;
+        } else {
+          if (!playerBufferState.hasStreamStarted) {
+            playerBufferState.hasStreamStarted = true;
+          }
+          if (isChrome && wasVideoPlaying && !videos[0].ended && videos[0].paused && videos[0].muted) {
+            videos[0].play().catch(() => {});
+          }
+        }
       }
+      block(e);
     };
 
     document.addEventListener('visibilitychange', visibilityChange, true);
     document.addEventListener('webkitvisibilitychange', visibilityChange, true);
     document.addEventListener('mozvisibilitychange', visibilityChange, true);
     document.addEventListener('hasFocus', block, true);
+
+    try {
+      if (/Firefox/.test(navigator.userAgent)) {
+        Object.defineProperty(document, 'mozHidden', {
+          get() { return false; }
+        });
+      } else {
+        Object.defineProperty(document, 'webkitHidden', {
+          get() { return false; }
+        });
+      }
+    } catch {}
 
     // Preservar configuración de calidad y volumen
     try {
@@ -968,6 +1056,9 @@ export function runTwitchShield() {
         }
         return realGetItem.apply(this, arguments as any);
       };
+      if (!localStorage.getItem.toString().includes(Object.keys({ cachedValues })[0])) {
+        localStorageHookFailed = true;
+      }
     } catch (err) {
       localStorageHookFailed = true;
     }
