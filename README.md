@@ -14,7 +14,7 @@ Compatible con **Violentmonkey** o **Tampermonkey** (Firefox, Chrome, Brave, Edg
 2. Agrega un nuevo script en la extensión y copia el contenido compilado de:
    👉 **[`dist/twitch-shield.user.js`](dist/twitch-shield.user.js)**
 3. Guarda el script.
-4. Abre cualquier stream en [twitch.tv](https://www.twitch.tv). Verás el indicador `🛡️ TwitchShield Active` en la esquina superior izquierda del reproductor.
+4. Abre cualquier stream en [twitch.tv](https://www.twitch.tv). Funcionará de forma 100% silenciosa en segundo plano (sin banners ni elementos que interrumpan la visualización).
 
 ---
 
@@ -26,22 +26,20 @@ Compatible con **Violentmonkey** o **Tampermonkey** (Firefox, Chrome, Brave, Edg
    twitch.tv##+js(twitch-videoad)
    ```
 3. En la pestaña **Configuración**, activa la casilla **"Soy un usuario avanzado"** y haz clic en el icono del engranaje ⚙️.
-4. Busca `userResourcesLocation` y escribe la ruta local o URL a:
+4. En `userResourcesLocation`, añade la ruta local:
    ```text
-   userResourcesLocation file:///home/axioma/Documentos/Proyectos/TwitchShield/dist/twitch-shield.ublock.js
+   file:///home/axioma/Documentos/Proyectos/TwitchShield/dist/twitch-shield.ublock.js
    ```
-   *(Si ya tienes otra URL, deja un espacio antes de agregar esta).*
-5. Haz clic en **Aplicar cambios** y reinicia el navegador o recarga la extensión.
+5. Haz clic en **Aplicar cambios**.
 
 ---
 
-## ⚙️ Menú en el Reproductor
+## ⚙️ Configuración y Modo Silencioso
 
-Haz clic en el indicador `🛡️ TwitchShield` o en su icono `⚙️` en la pantalla del directo para abrir el panel de control:
-* **Auto Buffer Watchdog:** Detecta y recupera automáticamente congelamientos de video sin recargar la página.
-* **Ad Stripping Fallback:** Suprime los fragmentos de anuncio si los streams limpios de respaldo no están disponibles.
-* **Full Reload on Stall:** Activa recarga profunda si el stream se congela repetidamente.
-* **🔄 Force Reload Stream:** Botón manual para resincronizar el reproductor con un solo clic.
+* **Modo Silencioso por Defecto:** No añade elementos visuales ni banners sobre el reproductor de Twitch para no interrumpir el directo.
+* **Soporte de Idiomas:** Mensajes y configuración en Español (`es`) por defecto con soporte multi-idioma.
+* **Watchdog Anti-Congelamiento:** Monitorea el buffering para evitar pausas o pantallas negras tras los cortes de streaming.
+* **Consola de Diagnóstico:** Puedes consultar el estado en cualquier momento ejecutando `TwitchShield.status()` en la consola del navegador.
 
 ---
 
